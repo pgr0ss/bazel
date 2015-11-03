@@ -107,7 +107,7 @@ public abstract class InvalidatingNodeVisitor<TGraph extends ThinNodeQueryableGr
       // The caller may have specified non-existent SkyKeys, or there may be stale SkyKeys in
       // pendingVisitations that have already been deleted. In both these cases, the nodes will not
       // exist in the graph, so we must be tolerant of that case.
-      visit(visitData.first, visitData.second, !MUST_EXIST);
+      visit(visitData.first, null, visitData.second, !MUST_EXIST);
     }
     work(/*failFastOnInterrupt=*/true);
     Preconditions.checkState(pendingVisitations.isEmpty(),
@@ -132,7 +132,7 @@ public abstract class InvalidatingNodeVisitor<TGraph extends ThinNodeQueryableGr
    * Enqueues a node for invalidation.
    */
   @ThreadSafe
-  abstract void visit(SkyKey key, InvalidationType second, boolean mustExist);
+  abstract void visit(SkyKey key, SkyKey reason, InvalidationType second, boolean mustExist);
 
   @VisibleForTesting
   enum InvalidationType {
@@ -218,7 +218,7 @@ public abstract class InvalidatingNodeVisitor<TGraph extends ThinNodeQueryableGr
     }
 
     @Override
-    public void visit(final SkyKey key, InvalidationType invalidationType, boolean mustExist) {
+    public void visit(final SkyKey key, final SkyKey reason, InvalidationType invalidationType, boolean mustExist) {
       Preconditions.checkState(invalidationType == InvalidationType.DELETED, key);
       if (!visitedValues.add(key)) {
         return;
@@ -235,10 +235,12 @@ public abstract class InvalidatingNodeVisitor<TGraph extends ThinNodeQueryableGr
                 return;
               }
 
+              System.out.println("DELETING " + reason + " => " + key);
+
               if (traverseGraph) {
                 // Propagate deletion upwards.
                 for (SkyKey reverseDep : entry.getReverseDeps()) {
-                  visit(reverseDep, InvalidationType.DELETED, !MUST_EXIST);
+                  visit(reverseDep, key, InvalidationType.DELETED, !MUST_EXIST);
                 }
 
                 // Unregister this node as an rdep from its direct deps, since reverse dep edges
@@ -335,7 +337,7 @@ public abstract class InvalidatingNodeVisitor<TGraph extends ThinNodeQueryableGr
      */
     @Override
     @ThreadSafe
-    public void visit(final SkyKey key, final InvalidationType invalidationType,
+    public void visit(final SkyKey key, final SkyKey reason, final InvalidationType invalidationType,
         final boolean mustExist) {
       Preconditions.checkState(invalidationType != InvalidationType.DELETED, key);
       final boolean isChanged = (invalidationType == InvalidationType.CHANGED);
@@ -359,6 +361,8 @@ public abstract class InvalidatingNodeVisitor<TGraph extends ThinNodeQueryableGr
                 return;
               }
 
+              System.out.println("INVALIDATING " + reason + " => " + key);
+
               if (entry.isChanged() || (!isChanged && entry.isDirty())) {
                 // If this node is already marked changed, or we are only marking this node
                 // dirty, and it already is, move along.
@@ -377,7 +381,7 @@ public abstract class InvalidatingNodeVisitor<TGraph extends ThinNodeQueryableGr
               // Propagate dirtiness upwards and mark this node dirty/changed. Reverse deps should
               // only be marked dirty (because only a dependency of theirs has changed).
               for (SkyKey reverseDep : entry.getReverseDeps()) {
-                visit(reverseDep, InvalidationType.DIRTIED, MUST_EXIST);
+                visit(reverseDep, key, InvalidationType.DIRTIED, MUST_EXIST);
               }
 
               informInvalidationReceiver(key, EvaluationProgressReceiver.InvalidationState.DIRTY);
